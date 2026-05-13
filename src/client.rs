@@ -1,5 +1,6 @@
 // #![cfg(feature = "rustls")]
 
+use rustls::crypto::aws_lc_rs;
 use clap::Parser;
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Endpoint, VarInt};
@@ -126,6 +127,7 @@ pub fn make_client_endpoint(bind_addr: SocketAddr) -> Result<Endpoint, Box<dyn E
 #[tokio::main]
 pub async fn run(options: Opt) -> Result<(), Box<dyn Error>> {
     let url = options.url;
+    let _ = aws_lc_rs::default_provider().install_default();
     if url.scheme() != "quic" {
         return Err("URL scheme must be quic".into());
     }
