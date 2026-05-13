@@ -1,5 +1,6 @@
 use clap::Parser;
-use quinn::{crypto, Endpoint, ServerConfig, VarInt};
+use quinn::{Endpoint, ServerConfig, VarInt, crypto};
+use rustls::pki_types::PrivateKeyDer;
 
 use log::{debug, error, info};
 use serde::Deserialize;
@@ -28,20 +29,19 @@ pub struct Opt {
 /// Returns default server configuration along with its certificate.
 fn configure_server() -> Result<(ServerConfig, Vec<u8>), Box<dyn Error>> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let cert_der = cert.serialize_der().unwrap();
-    let priv_key = cert.serialize_private_key_der();
-    let priv_key = rustls::PrivateKey(priv_key);
-    let cert_chain = vec![rustls::Certificate(cert_der.clone())];
+    let cert_der = cert.cert.der();
+    let priv_key = PrivateKeyDer::from(cert.signing_key);
+    let cert_chain = vec![cert_der.clone()];
 
     let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key)?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_concurrent_uni_streams(0_u8.into());
     transport_config.max_idle_timeout(Some(VarInt::from_u32(60_000).into()));
     transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(1)));
-    #[cfg(any(windows, os = "linux"))]
+    #[cfg(any(windows, target_os = "linux"))]
     transport_config.mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()));
 
-    Ok((server_config, cert_der))
+    Ok((server_config, cert_der.as_ref().to_vec()))
 }
 
 #[allow(unused)]
