@@ -1,18 +1,23 @@
 // #![cfg(feature = "rustls")]
 
 use clap::Parser;
+use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Endpoint, VarInt};
+use rustls::{
+    client,
+    pki_types::{CertificateDer, ServerName},
+};
 use std::{error::Error, net::SocketAddr, sync::Arc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[cfg(not(windows))]
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 #[cfg(windows)]
 use tokio::signal::windows::ctrl_c;
 use url::Url;
 
 #[allow(unused_imports)]
-use log::{debug, error, info, trace, warn, Level};
+use log::{Level, debug, error, info, trace, warn};
 
 #[derive(Parser, Debug)]
 #[clap(name = "client")]
@@ -25,19 +30,20 @@ pub struct Opt {
 }
 
 /// Enables MTUD if supported by the operating system
-#[cfg(not(any(windows, os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn enable_mtud_if_supported() -> quinn::TransportConfig {
     quinn::TransportConfig::default()
 }
 
 /// Enables MTUD if supported by the operating system
-#[cfg(any(windows, os = "linux"))]
+#[cfg(any(windows, target_os = "linux"))]
 pub fn enable_mtud_if_supported() -> quinn::TransportConfig {
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()));
     transport_config
 }
 
+#[derive(Debug)]
 struct SkipServerVerification;
 
 impl SkipServerVerification {
@@ -46,27 +52,48 @@ impl SkipServerVerification {
     }
 }
 
-impl rustls::client::ServerCertVerifier for SkipServerVerification {
+impl client::danger::ServerCertVerifier for SkipServerVerification {
     fn verify_server_cert(
         &self,
-        _end_entity: &rustls::Certificate,
-        _intermediates: &[rustls::Certificate],
-        _server_name: &rustls::ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp_response: &[u8],
-        _now: std::time::SystemTime,
-    ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::ServerCertVerified::assertion())
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
+        _: &[u8],
+        _: rustls::pki_types::UnixTime,
+    ) -> Result<client::danger::ServerCertVerified, rustls::Error> {
+        Ok(client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &rustls::DigitallySignedStruct,
+    ) -> Result<client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &rustls::DigitallySignedStruct,
+    ) -> Result<client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        vec![rustls::SignatureScheme::ED25519] // A randomly picked one
     }
 }
 
 fn configure_client() -> Result<ClientConfig, Box<dyn Error>> {
     let crypto = rustls::ClientConfig::builder()
-        .with_safe_defaults()
+        .dangerous()
         .with_custom_certificate_verifier(SkipServerVerification::new())
         .with_no_client_auth();
-
-    let mut client_config = ClientConfig::new(Arc::new(crypto));
+    let quic_config = QuicClientConfig::try_from(crypto)?;
+    let mut client_config = ClientConfig::new(Arc::new(quic_config));
     let mut transport_config = enable_mtud_if_supported();
     transport_config.max_idle_timeout(Some(VarInt::from_u32(60_000).into()));
     transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(1)));
