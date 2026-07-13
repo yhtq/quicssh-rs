@@ -215,7 +215,8 @@ pub async fn run(options: Opt) -> Result<(), Box<dyn Error>> {
                 // closed
                 Ok(n) => {
                     if n == 0 {
-                        continue;
+                        info!("[client] recv EOF from stdin");
+                        break;
                     }
                     debug!("[client] recv data from stdin {} bytes", n);
                     // Copy the data back to socket
