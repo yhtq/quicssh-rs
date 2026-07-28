@@ -149,8 +149,8 @@ async fn handle_connection(proxy_for: SocketAddr, connection: quinn::Connection)
                 Ok(n) => {
                     debug!("[server] recv data from ssh server {} bytes", n);
                     if n == 0 {
-                        // 0 means EOF here, so we directly close the quic stream
-                        info!("[server] EOF received, closing quic stream");
+                        // 0 means EOF here, so we directly close the stream
+                        info!("[server] EOF received, closing stream");
                         return;
                     }
                     match quinn_send.write_all(&buf[..n]).await {
@@ -174,12 +174,14 @@ async fn handle_connection(proxy_for: SocketAddr, connection: quinn::Connection)
         loop {
             match quinn_recv.read(&mut buf).await {
                 Ok(None) => {
-                    continue;
+                    info!("[server] NONE received, closing stream");
+                    return;
                 }
                 Ok(Some(n)) => {
                     debug!("[server] recv data from quic stream {} bytes", n);
                     if n == 0 {
-                        continue;
+                        info!("[server] EOF 0 received, closing stream");
+                        return;
                     }
                     match ssh_write.write_all(&buf[..n]).await {
                         Ok(_) => (),
